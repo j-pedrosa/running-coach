@@ -45,6 +45,32 @@ runBtn.addEventListener('click', async () => {
 // Markdown to HTML (lightweight)
 function md(text) {
   if (!text) return '';
+
+  // Extract and convert markdown tables first
+  text = text.replace(/((?:^\|.+\|$\n?)+)/gm, (tableBlock) => {
+    const rows = tableBlock.trim().split('\n').filter(r => r.trim());
+    if (rows.length < 2) return tableBlock;
+
+    const parseRow = r => r.split('|').slice(1, -1).map(c => c.trim());
+    const headers = parseRow(rows[0]);
+
+    // Skip separator row (|---|---|...)
+    const startIdx = rows[1].match(/^[\s|:-]+$/) ? 2 : 1;
+
+    let html = '<table class="md-table"><thead><tr>';
+    headers.forEach(h => { html += `<th>${h}</th>`; });
+    html += '</tr></thead><tbody>';
+
+    for (let i = startIdx; i < rows.length; i++) {
+      const cells = parseRow(rows[i]);
+      html += '<tr>';
+      cells.forEach(c => { html += `<td>${c.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</td>`; });
+      html += '</tr>';
+    }
+    html += '</tbody></table>';
+    return html;
+  });
+
   return text
     .replace(/^### (.+)$/gm, '<h3>$1</h3>')
     .replace(/^## (.+)$/gm, '<h2>$1</h2>')
