@@ -1,0 +1,188 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/j-pedrosa/running-coach/internal/coach"
+	"github.com/j-pedrosa/running-coach/internal/store"
+)
+
+type handlers struct {
+	store  *store.Store
+	coach  *coach.Coach
+	logger *slog.Logger
+}
+
+func handleHealth(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *handlers) handleTrigger(w http.ResponseWriter, r *http.Request) {
+	force := r.URL.Query().Get("force") == "true"
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if err := h.coach.Run(ctx, force); err != nil {
+			h.logger.Error("manual trigger failed", "error", err)
+		}
+	}()
+
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "triggered"})
+}
+
+func (h *handlers) handleBackfill(w http.ResponseWriter, r *http.Request) {
+	count := 30
+	if v := r.URL.Query().Get("count"); v != "" {
+		if c, err := strconv.Atoi(v); err == nil && c > 0 && c <= 200 {
+			count = c
+		}
+	}
+
+	saved, err := h.coach.Backfill(r.Context(), count)
+	if err != nil {
+		h.logger.Error("backfill failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"saved": saved, "requested": count})
+}
+
+func (h *handlers) handleStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.coach.GetStatus())
+}
+
+func (h *handlers) handleListActivities(w http.ResponseWriter, r *http.Request) {
+	limit := 10
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if l, err := strconv.Atoi(v); err == nil && l > 0 && l <= 100 {
+			limit = l
+		}
+	}
+
+	activities, err := h.store.ListActivities(r.Context(), limit)
+	if err != nil {
+		h.logger.Error("listing activities", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list activities"})
+		return
+	}
+	writeJSON(w, http.StatusOK, activities)
+}
+
+func (h *handlers) handleLatestActivity(w http.ResponseWriter, r *http.Request) {
+	activity, err := h.store.GetLatestActivity(r.Context())
+	if err != nil {
+		h.logger.Error("getting latest activity", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get activity"})
+		return
+	}
+	if activity == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no activities found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, activity)
+}
+
+func (h *handlers) handleLatestReport(w http.ResponseWriter, r *http.Request) {
+	report, err := h.store.GetLatestReport(r.Context())
+	if err != nil {
+		h.logger.Error("getting latest report", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get report"})
+		return
+	}
+	if report == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no reports found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
+}
+
+func (h *handlers) handlePlan(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Write([]byte(h.coach.GetPlan()))
+}
+
+func (h *handlers) handlePlanStatus(w http.ResponseWriter, r *http.Request) {
+	activities, err := h.store.ListActivities(r.Context(), 100)
+	if err != nil {
+		h.logger.Error("listing activities for plan status", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list activities"})
+		return
+	}
+
+	// Load strength done flags from config
+	cfg := h.coach.GetPlanConfig()
+	strengthDone := make(map[int]bool)
+	if cfg != nil {
+		for w := 1; w <= cfg.TotalWeeks; w++ {
+			val, _ := h.store.GetConfig(r.Context(), fmt.Sprintf("strength_done_w%d", w))
+			strengthDone[w] = val == "true"
+		}
+	}
+
+	status := coach.BuildPlanStatus(cfg, activities, strengthDone)
+	writeJSON(w, http.StatusOK, status)
+}
+
+func (h *handlers) handleToggleStrength(w http.ResponseWriter, r *http.Request) {
+	weekStr := r.URL.Query().Get("week")
+	week, err := strconv.Atoi(weekStr)
+	if err != nil || week < 1 || week > 8 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid week"})
+		return
+	}
+
+	key := fmt.Sprintf("strength_done_w%d", week)
+	current, _ := h.store.GetConfig(r.Context(), key)
+
+	newVal := "true"
+	if current == "true" {
+		newVal = "false"
+	}
+
+	if err := h.store.SetConfig(r.Context(), key, newVal); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"week": week, "done": newVal == "true"})
+}
+
+func (h *handlers) handleReportByActivity(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("activityID")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid activity ID"})
+		return
+	}
+
+	report, err := h.store.GetReportByActivity(r.Context(), id)
+	if err != nil {
+		h.logger.Error("getting report by activity", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get report"})
+		return
+	}
+	if report == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no report for this activity"})
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
+}
+
+func (h *handlers) handleAthlete(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Write([]byte(h.coach.GetAthlete()))
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
+}

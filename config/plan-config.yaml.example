@@ -1,0 +1,40 @@
+# Plan configuration for the dashboard plan tracker.
+# Copy to plan-config.yaml and customize.
+# start_date must be a Saturday (weeks run Sat→Fri).
+
+start_date: "2026-05-02"
+total_weeks: 8
+
+weeks:
+  1:
+    saturday: "Run 1min/Walk 2min x8"
+    monday: "Run 1min/Walk 2min x8"
+    wednesday: "Strength: 2 rounds — Squats x12, Push-ups x8, Lunges x10, Plank 30s"
+  2:
+    saturday: "Run 1min/Walk 2min x8"
+    monday: "Run 1min/Walk 2min x8"
+    wednesday: "Strength: 2 rounds — Squats x12, Push-ups x8, Lunges x10, Plank 30s"
+  3:
+    saturday: "Run 2min/Walk 2min x7-8"
+    monday: "Run 2min/Walk 2min x8"
+    wednesday: "Strength: 3 rounds — Squats 12-15, Push-ups x10, Plank 35-40s"
+  4:
+    saturday: "10-15min continuous easy run"
+    monday: "Run 2min/Walk 2min x8"
+    wednesday: "Strength: 3 rounds — Squats 12-15, Push-ups x10, Plank 35-40s"
+  5:
+    saturday: "20min continuous easy run"
+    monday: "Run 5min/Walk 2min x4-5"
+    wednesday: "Strength: 3 rounds — Squats x15, Push-ups 10-12, Lunges x12, Plank 40-45s"
+  6:
+    saturday: "20min continuous easy run"
+    monday: "Run 5min/Walk 2min x4-5"
+    wednesday: "Strength: 3 rounds — Squats x15, Push-ups 10-12, Lunges x12, Plank 40-45s"
+  7:
+    saturday: "30min continuous run"
+    monday: "25-30min continuous run"
+    wednesday: "Strength: 3 rounds — Squats x15, Push-ups x12, Lunges x12, Plank 45s"
+  8:
+    saturday: "30min continuous run"
+    monday: "25-30min continuous run"
+    wednesday: "Strength: 3 rounds — Squats x15, Push-ups x12, Lunges x12, Plank 45s"

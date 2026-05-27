@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Running Coach</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head>
+<body>
+  <div class="header">
+    <h1><span>🏃</span> Running Coach</h1>
+    <button class="btn btn-primary" id="run-btn">Run Now</button>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="dashboard">🏃 Última Corrida</div>
+    <div class="tab" data-tab="plan">📋 Plano de Treino</div>
+  </div>
+
+  <div class="content">
+    <div class="tab-panel active" id="dashboard">
+      <div id="dashboard-content">
+        <div class="loading"><div class="spinner"></div><p>A carregar...</p></div>
+      </div>
+      <div id="history"></div>
+    </div>
+
+    <div class="tab-panel" id="plan">
+      <div class="loading"><div class="spinner"></div><p>A carregar...</p></div>
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

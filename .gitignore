@@ -1,0 +1,11 @@
+.env
+data/
+*.db
+.DS_Store
+running-coach
+server
+
+# Config files with personal data — only .example files are committed
+config/athlete.md
+config/training-plan.md
+config/plan-config.yaml
