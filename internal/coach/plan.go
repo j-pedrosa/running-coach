@@ -13,9 +13,11 @@ import (
 
 // PlanConfig is loaded from plan-config.yaml at startup.
 type PlanConfig struct {
-	StartDate  string                       `yaml:"start_date"`
-	TotalWeeks int                          `yaml:"total_weeks"`
-	Weeks      map[int]PlanWeekConfig       `yaml:"weeks"`
+	StartDate  string                 `yaml:"start_date"`
+	TotalWeeks int                    `yaml:"total_weeks"`
+	Schedule   string                 `yaml:"schedule"`
+	Notes      string                 `yaml:"notes"`
+	Weeks      map[int]PlanWeekConfig `yaml:"weeks"`
 	startTime  time.Time
 }
 
@@ -23,6 +25,46 @@ type PlanWeekConfig struct {
 	Saturday  string `yaml:"saturday"`
 	Monday    string `yaml:"monday"`
 	Wednesday string `yaml:"wednesday"`
+}
+
+// ToMarkdown generates a training plan description for Claude's context.
+func (p *PlanConfig) ToMarkdown() string {
+	if p == nil {
+		return "No training plan configured."
+	}
+
+	s := fmt.Sprintf("# Training Plan\n\n")
+	s += fmt.Sprintf("- **Started:** %s\n", p.StartDate)
+	s += fmt.Sprintf("- **Total weeks:** %d\n", p.TotalWeeks)
+	s += fmt.Sprintf("- **Current week:** %d\n", p.CurrentWeek())
+	if p.Schedule != "" {
+		s += fmt.Sprintf("\n## Schedule\n%s\n", p.Schedule)
+	}
+
+	s += "\n## Weekly Sessions\n"
+	for w := 1; w <= p.TotalWeeks; w++ {
+		wk, ok := p.Weeks[w]
+		if !ok {
+			continue
+		}
+		status := ""
+		cw := p.CurrentWeek()
+		if w < cw {
+			status = " (DONE)"
+		} else if w == cw {
+			status = " (CURRENT)"
+		}
+		s += fmt.Sprintf("\n### Week %d%s\n", w, status)
+		s += fmt.Sprintf("- **Saturday (Run):** %s\n", wk.Saturday)
+		s += fmt.Sprintf("- **Monday (Run):** %s\n", wk.Monday)
+		s += fmt.Sprintf("- **Wednesday (Strength):** %s\n", wk.Wednesday)
+	}
+
+	if p.Notes != "" {
+		s += fmt.Sprintf("\n## Coaching Notes\n%s\n", p.Notes)
+	}
+
+	return s
 }
 
 func LoadPlanConfig(logger *slog.Logger) *PlanConfig {

@@ -22,9 +22,6 @@ import (
 //go:embed prompts/athlete.md
 var defaultAthleteMD string
 
-//go:embed prompts/training-plan.md
-var defaultTrainingPlanMD string
-
 var ErrAlreadyRunning = errors.New("coach pipeline is already running")
 var ErrNoNewActivity = errors.New("no new activity to report")
 
@@ -42,7 +39,6 @@ type Coach struct {
 	chart      *chart.Client
 	store      Store
 	athlete    string
-	plan       string
 	planConfig *PlanConfig
 	logger     *slog.Logger
 
@@ -75,7 +71,6 @@ func New(
 		store:      store,
 		planConfig: planConfig,
 		athlete:    loadPrompt("/app/config/athlete.md", defaultAthleteMD),
-		plan:       loadPrompt("/app/config/training-plan.md", defaultTrainingPlanMD),
 		logger:     logger,
 	}
 }
@@ -89,7 +84,7 @@ func (c *Coach) GetStatus() Status {
 }
 
 func (c *Coach) GetAthlete() string { return c.athlete }
-func (c *Coach) GetPlan() string    { return c.plan }
+func (c *Coach) GetPlan() string    { return c.planConfig.ToMarkdown() }
 
 // Backfill fetches recent activities from Strava and saves them to the DB (no Claude/Telegram).
 func (c *Coach) Backfill(ctx context.Context, count int) (int, error) {
@@ -304,7 +299,7 @@ Comparison with previous sessions, trends
 What to do in upcoming sessions (specific, based on the plan)
 
 💥 **RESUMO DIRETO**
-1-2 raw, honest sentences about the current state`, c.athlete, c.plan)
+1-2 raw, honest sentences about the current state`, c.athlete, c.planConfig.ToMarkdown())
 }
 
 func (c *Coach) buildUserMessage(a *models.Activity) string {
