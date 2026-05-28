@@ -49,6 +49,15 @@ var migrations = []string{
 	// v3: laps and hr zones data
 	`ALTER TABLE activities ADD COLUMN laps_json TEXT DEFAULT '';
 	 ALTER TABLE activities ADD COLUMN hr_zones_json TEXT DEFAULT '';`,
+
+	// v4: pipeline event log
+	`CREATE TABLE IF NOT EXISTS events (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		type       TEXT NOT NULL,
+		message    TEXT NOT NULL,
+		detail     TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);`,
 }
 
 func (s *Store) Migrate(ctx context.Context) error {

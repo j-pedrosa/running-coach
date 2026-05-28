@@ -13,10 +13,13 @@ import (
 
 // PlanConfig is loaded from plan-config.yaml at startup.
 type PlanConfig struct {
+	Name       string                 `yaml:"name"`
 	StartDate  string                 `yaml:"start_date"`
 	TotalWeeks int                    `yaml:"total_weeks"`
 	Schedule   string                 `yaml:"schedule"`
 	Notes      string                 `yaml:"notes"`
+	Goal       string                 `yaml:"goal"`
+	GoalKm     float64                `yaml:"goal_km"`
 	Weeks      map[int]PlanWeekConfig `yaml:"weeks"`
 	startTime  time.Time
 }
@@ -154,6 +157,9 @@ func MatchActivityToPlan(a *models.Activity, plan *PlanConfig) {
 // ── Plan Status for frontend ──────────────────────────
 
 type PlanStatus struct {
+	Name        string       `json:"name"`
+	Goal        string       `json:"goal"`
+	GoalKm      float64      `json:"goal_km"`
 	CurrentWeek int          `json:"current_week"`
 	TotalWeeks  int          `json:"total_weeks"`
 	Progress    int          `json:"progress"`
@@ -281,6 +287,9 @@ func BuildPlanStatus(plan *PlanConfig, activities []models.Activity, strengthDon
 	progress := (doneWeeks * 100) / plan.TotalWeeks
 
 	return PlanStatus{
+		Name:        plan.Name,
+		Goal:        plan.Goal,
+		GoalKm:      plan.GoalKm,
 		CurrentWeek: currentWeek,
 		TotalWeeks:  plan.TotalWeeks,
 		Progress:    progress,

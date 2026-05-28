@@ -176,6 +176,50 @@ func (h *handlers) handleReportByActivity(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, report)
 }
 
+func (h *handlers) handleEvents(w http.ResponseWriter, r *http.Request) {
+	events, err := h.store.ListEvents(r.Context(), 20)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list events"})
+		return
+	}
+	writeJSON(w, http.StatusOK, events)
+}
+
+func (h *handlers) handleHealthDetail(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	expiresAt, _ := h.store.GetConfig(ctx, "strava_expires_at")
+	lastReported, _ := h.store.GetConfig(ctx, "last_reported_activity_id")
+
+	var stravaExpiry string
+	if expiresAt != "" {
+		if ts, err := strconv.ParseInt(expiresAt, 10, 64); err == nil {
+			t := time.Unix(ts, 0)
+			stravaExpiry = t.Format(time.RFC3339)
+		}
+	}
+
+	status := h.coach.GetStatus()
+	planCfg := h.coach.GetPlanConfig()
+	currentWeek := 0
+	totalWeeks := 0
+	if planCfg != nil {
+		currentWeek = planCfg.CurrentWeek()
+		totalWeeks = planCfg.TotalWeeks
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"strava_token_expires": stravaExpiry,
+		"last_reported_id":     lastReported,
+		"last_run":             status.LastRun,
+		"last_result":          status.Result,
+		"last_error":           status.LastError,
+		"plan_week":            currentWeek,
+		"plan_total_weeks":     totalWeeks,
+		"running":              status.Running,
+		"step":                 status.Step,
+	})
+}
+
 func (h *handlers) handleAthlete(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 	w.Write([]byte(h.coach.GetAthlete()))

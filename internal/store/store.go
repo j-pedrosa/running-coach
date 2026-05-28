@@ -261,3 +261,39 @@ func (s *Store) GetReportByActivity(ctx context.Context, activityID int64) (*mod
 	}
 	return r, nil
 }
+
+// Events
+
+type Event struct {
+	ID        int64     `json:"id"`
+	Type      string    `json:"type"`
+	Message   string    `json:"message"`
+	Detail    string    `json:"detail,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (s *Store) LogEvent(ctx context.Context, eventType, message, detail string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO events (type, message, detail) VALUES (?, ?, ?)`,
+		eventType, message, detail)
+	return err
+}
+
+func (s *Store) ListEvents(ctx context.Context, limit int) ([]Event, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, type, message, COALESCE(detail,''), created_at FROM events ORDER BY created_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []Event
+	for rows.Next() {
+		var e Event
+		if err := rows.Scan(&e.ID, &e.Type, &e.Message, &e.Detail, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		events = append(events, e)
+	}
+	return events, rows.Err()
+}

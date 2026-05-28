@@ -6,61 +6,88 @@ async function fetchJSON(path) {
   return resp.json();
 }
 
-async function fetchText(path) {
-  const resp = await fetch(API + path);
-  if (!resp.ok) return null;
-  return resp.text();
+// ── Theme toggle (#7) ─────────────────────────────────
+
+const themeBtn = document.getElementById('theme-btn');
+function setTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
+  localStorage.setItem('theme', theme);
+}
+themeBtn.addEventListener('click', () => {
+  const current = document.documentElement.getAttribute('data-theme');
+  setTheme(current === 'dark' ? 'light' : 'dark');
+});
+setTheme(localStorage.getItem('theme') || 'dark');
+
+// ── Tab switching ─────────────────────────────────────
+
+function switchTab(tabName) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+  document.getElementById(tabName).classList.add('active');
 }
 
-// Tab switching
 document.querySelectorAll('.tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-    tab.classList.add('active');
-    document.getElementById(tab.dataset.tab).classList.add('active');
-  });
+  tab.addEventListener('click', () => switchTab(tab.dataset.tab));
 });
 
-// Run Now button
+// ── Pipeline progress (#9) ────────────────────────────
+
+const pipelineBar = document.getElementById('pipeline-bar');
 const runBtn = document.getElementById('run-btn');
+let pollInterval = null;
+
 runBtn.addEventListener('click', async () => {
   runBtn.disabled = true;
   runBtn.textContent = 'A correr...';
+  pipelineBar.style.display = '';
+  updatePipelineStep('strava');
 
   await fetch(API + '/api/trigger', { method: 'POST' });
 
-  const poll = setInterval(async () => {
+  pollInterval = setInterval(async () => {
     const status = await fetchJSON('/api/status');
-    if (status && !status.running) {
-      clearInterval(poll);
+    if (!status) return;
+    if (status.running) {
+      updatePipelineStep(status.step || 'strava');
+    } else {
+      clearInterval(pollInterval);
+      pipelineBar.style.display = 'none';
       runBtn.disabled = false;
       runBtn.textContent = 'Run Now';
       loadDashboard();
       loadPlan();
+      loadHealth();
     }
-  }, 3000);
+  }, 1500);
 });
 
-// Markdown to HTML (lightweight)
+function updatePipelineStep(currentStep) {
+  document.querySelectorAll('.pipe-step').forEach(el => {
+    el.classList.remove('active', 'done');
+    const steps = ['strava', 'strava-detail', 'claude', 'chart', 'telegram'];
+    const curIdx = steps.indexOf(currentStep);
+    const elIdx = steps.indexOf(el.dataset.step);
+    if (elIdx < curIdx) el.classList.add('done');
+    if (elIdx === curIdx) el.classList.add('active');
+  });
+}
+
+// ── Markdown to HTML ──────────────────────────────────
+
 function md(text) {
   if (!text) return '';
-
-  // Extract and convert markdown tables first
   text = text.replace(/((?:^\|.+\|$\n?)+)/gm, (tableBlock) => {
     const rows = tableBlock.trim().split('\n').filter(r => r.trim());
     if (rows.length < 2) return tableBlock;
-
     const parseRow = r => r.split('|').slice(1, -1).map(c => c.trim());
     const headers = parseRow(rows[0]);
-
-    // Skip separator row (|---|---|...)
     const startIdx = rows[1].match(/^[\s|:-]+$/) ? 2 : 1;
-
     let html = '<table class="md-table"><thead><tr>';
     headers.forEach(h => { html += `<th>${h}</th>`; });
     html += '</tr></thead><tbody>';
-
     for (let i = startIdx; i < rows.length; i++) {
       const cells = parseRow(rows[i]);
       html += '<tr>';
@@ -70,7 +97,6 @@ function md(text) {
     html += '</tbody></table>';
     return html;
   });
-
   return text
     .replace(/^### (.+)$/gm, '<h3>$1</h3>')
     .replace(/^## (.+)$/gm, '<h2>$1</h2>')
@@ -99,7 +125,17 @@ function formatDate(dateStr) {
   return d.toLocaleDateString('pt-PT', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-// ── Dashboard Tab ──────────────────────────────────────
+function timeAgo(dateStr) {
+  const d = new Date(dateStr);
+  const now = new Date();
+  const diff = Math.floor((now - d) / 1000);
+  if (diff < 60) return 'agora';
+  if (diff < 3600) return `${Math.floor(diff/60)}min`;
+  if (diff < 86400) return `${Math.floor(diff/3600)}h`;
+  return `${Math.floor(diff/86400)}d`;
+}
+
+// ── Dashboard Tab ─────────────────────────────────────
 
 async function loadDashboard() {
   const [activity, report, activities] = await Promise.all([
@@ -107,27 +143,36 @@ async function loadDashboard() {
     fetchJSON('/api/reports/latest'),
     fetchJSON('/api/activities?limit=20'),
   ]);
-
   renderDashboard(activity, report);
   renderHistory(activities || []);
 }
 
 function renderDashboard(activity, report) {
   const panel = document.getElementById('dashboard-content');
-
   if (!activity) {
-    panel.innerHTML = `
-      <div class="empty-state">
-        <div class="icon">🏃</div>
-        <p>Ainda sem corridas registadas.</p>
-        <p>Carrega em "Run Now" para buscar a última atividade do Strava.</p>
-      </div>`;
+    panel.innerHTML = `<div class="empty-state"><div class="icon">🏃</div><p>Ainda sem corridas. Carrega em "Run Now".</p></div>`;
     return;
   }
 
   const z2pct = activity.splits
-    ? Math.round(activity.splits.filter(s => s.avg_hr >= 115 && s.avg_hr <= 135).length / activity.splits.length * 100)
-    : 0;
+    ? Math.round(activity.splits.filter(s => s.avg_hr >= 115 && s.avg_hr <= 135).length / activity.splits.length * 100) : 0;
+
+  // Goal tracking (#13): find max continuous run distance from laps
+  const goalKm = 5;
+  let maxContinuousKm = 0;
+  if (activity.laps && activity.laps.length > 0) {
+    let current = 0;
+    const paceToSec = p => { if (!p) return 9999; const pts = p.split(':'); return parseInt(pts[0]) * 60 + parseInt(pts[1]); };
+    for (const l of activity.laps) {
+      if (paceToSec(l.pace) < 660 && l.moving_time <= 300) { // running pace, not warmup
+        current += l.distance / 1000;
+      } else {
+        if (current > maxContinuousKm) maxContinuousKm = current;
+        current = 0;
+      }
+    }
+    if (current > maxContinuousKm) maxContinuousKm = current;
+  }
 
   panel.innerHTML = `
     <div class="card">
@@ -136,22 +181,10 @@ function renderDashboard(activity, report) {
         <a href="https://www.strava.com/activities/${activity.strava_id}" target="_blank" class="strava-link" title="Ver no Strava">🔗</a>
       </div>
       <div class="hero-stats">
-        <div class="stat">
-          <div class="stat-value">${formatDistance(activity.distance)} km</div>
-          <div class="stat-label">Distância</div>
-        </div>
-        <div class="stat">
-          <div class="stat-value">${formatDuration(activity.moving_time)}</div>
-          <div class="stat-label">Tempo</div>
-        </div>
-        <div class="stat">
-          <div class="stat-value">${activity.avg_pace}/km</div>
-          <div class="stat-label">Ritmo</div>
-        </div>
-        <div class="stat">
-          <div class="stat-value">${Math.round(activity.avg_hr)}</div>
-          <div class="stat-label">FC Média</div>
-        </div>
+        <div class="stat"><div class="stat-value">${formatDistance(activity.distance)} km</div><div class="stat-label">Distância</div></div>
+        <div class="stat"><div class="stat-value">${formatDuration(activity.moving_time)}</div><div class="stat-label">Tempo</div></div>
+        <div class="stat"><div class="stat-value">${activity.avg_pace}/km</div><div class="stat-label">Ritmo</div></div>
+        <div class="stat"><div class="stat-value">${Math.round(activity.avg_hr)}</div><div class="stat-label">FC Média</div></div>
       </div>
       <div class="chips">
         <span class="chip ${z2pct >= 60 ? 'good' : 'warn'}">Zona 2: ${z2pct}%</span>
@@ -159,405 +192,177 @@ function renderDashboard(activity, report) {
       </div>
     </div>
 
-    ${activity.splits && activity.splits.length > 0 ? `
+    ${maxContinuousKm > 0 ? `
     <div class="card">
-      <div class="card-title">Splits — Ritmo & FC</div>
-      <div class="chart-container">
-        <canvas id="splits-chart"></canvas>
+      <div class="card-title">Objetivo: Correr ${goalKm}km Contínuos</div>
+      <div class="progress-bar"><div class="progress-fill" style="width:${Math.min(100, (maxContinuousKm/goalKm)*100)}%"></div></div>
+      <div class="progress-label">
+        <span>Max contínuo: ${maxContinuousKm.toFixed(2)} km</span>
+        <span>${Math.min(100, Math.round((maxContinuousKm/goalKm)*100))}%</span>
       </div>
-    </div>
-    ` : ''}
+    </div>` : ''}
+
+    ${activity.splits && activity.splits.length > 0 ? `
+    <div class="card"><div class="card-title">Splits — Ritmo & FC</div><div class="chart-container"><canvas id="splits-chart"></canvas></div></div>` : ''}
 
     ${activity.laps && activity.laps.length > 1 ? `
-    <div class="card">
-      <div class="card-title">Etapas (Laps) — Ritmo & FC</div>
-      <div class="chart-container">
-        <canvas id="laps-chart"></canvas>
-      </div>
-    </div>
-    ` : ''}
+    <div class="card"><div class="card-title">Etapas (Laps) — Ritmo & FC</div><div class="chart-container"><canvas id="laps-chart"></canvas></div></div>` : ''}
 
     <div class="card">
       <div class="card-title">Zonas de FC</div>
       <div class="hr-zones-container">
-        <div class="hr-donut-wrap">
-          <canvas id="hr-donut"></canvas>
-        </div>
+        <div class="hr-donut-wrap"><canvas id="hr-donut"></canvas></div>
         <div class="hr-legend" id="hr-legend"></div>
       </div>
     </div>
 
-    ${report ? `
-    <div class="card">
-      <div class="card-title">Relatório de Coaching</div>
-      <div class="report-text">${md(report.report_text)}</div>
-    </div>
-    ` : ''}
+    ${report ? `<div class="card"><div class="card-title">Relatório de Coaching</div><div class="report-text">${md(report.report_text)}</div></div>` : ''}
   `;
 
-  if (activity.laps && activity.laps.length > 1) {
-    renderLapsChart(activity.laps);
-  }
-  if (activity.splits && activity.splits.length > 0) {
-    renderSplitsChart(activity.splits);
-  }
-  renderHRZones(activity.hr_zones, activity.splits);
+  if (activity.laps && activity.laps.length > 1) renderLapsChart(activity.laps);
+  if (activity.splits && activity.splits.length > 0) renderSplitsChart(activity.splits);
+  renderHRZones(activity.hr_zones);
 }
 
 function renderSplitsChart(splits) {
   const ctx = document.getElementById('splits-chart');
   if (!ctx) return;
-
   const labels = splits.map(s => `Km ${s.kilometer}`);
   const paceData = splits.map(s => s.avg_speed > 0 ? 1000 / s.avg_speed : 0);
   const hrData = splits.map(s => s.avg_hr);
-  const bgColors = splits.map(s => s.avg_hr > 0 && s.avg_hr < 110
-    ? 'rgba(76, 175, 80, 0.7)'
-    : 'rgba(66, 165, 245, 0.7)');
-
-  new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [
-        {
-          label: 'Ritmo (s/km)',
-          data: paceData,
-          backgroundColor: bgColors,
-          borderColor: bgColors,
-          borderWidth: 1,
-          yAxisID: 'y',
-          order: 2,
-        },
-        {
-          label: 'FC (bpm)',
-          data: hrData,
-          type: 'line',
-          borderColor: 'rgba(255, 152, 0, 1)',
-          backgroundColor: 'rgba(255, 152, 0, 0.1)',
-          borderWidth: 2,
-          pointRadius: 4,
-          fill: false,
-          yAxisID: 'y1',
-          order: 1,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { labels: { color: '#e0e0e0' } },
-      },
-      scales: {
-        x: {
-          ticks: { color: '#aaa' },
-          grid: { color: 'rgba(255,255,255,0.1)' },
-        },
-        y: {
-          position: 'left',
-          title: { display: true, text: 'Ritmo (s/km)', color: '#aaa' },
-          ticks: {
-            color: '#aaa',
-            callback: v => {
-              const m = Math.floor(v / 60);
-              const s = Math.round(v % 60);
-              return `${m}:${String(s).padStart(2, '0')}`;
-            },
-          },
-          grid: { color: 'rgba(255,255,255,0.1)' },
-        },
-        y1: {
-          position: 'right',
-          title: { display: true, text: 'FC (bpm)', color: '#aaa' },
-          ticks: { color: '#aaa' },
-          grid: { display: false },
-        },
-      },
-    },
-  });
+  const bgColors = splits.map(s => s.avg_hr > 0 && s.avg_hr < 110 ? 'rgba(76,175,80,0.7)' : 'rgba(66,165,245,0.7)');
+  new Chart(ctx, { type: 'bar', data: { labels, datasets: [
+    { label: 'Ritmo (s/km)', data: paceData, backgroundColor: bgColors, borderColor: bgColors, borderWidth: 1, yAxisID: 'y', order: 2 },
+    { label: 'FC (bpm)', data: hrData, type: 'line', borderColor: 'rgba(255,152,0,1)', backgroundColor: 'rgba(255,152,0,0.1)', borderWidth: 2, pointRadius: 4, fill: false, yAxisID: 'y1', order: 1 },
+  ]}, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: 'var(--text)' } } },
+    scales: { x: { ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.1)' } },
+      y: { position: 'left', title: { display: true, text: 'Ritmo (s/km)', color: '#aaa' }, ticks: { color: '#aaa', callback: v => { const m = Math.floor(v/60); const s = Math.round(v%60); return `${m}:${String(s).padStart(2,'0')}`; } }, grid: { color: 'rgba(255,255,255,0.1)' } },
+      y1: { position: 'right', title: { display: true, text: 'FC (bpm)', color: '#aaa' }, ticks: { color: '#aaa' }, grid: { display: false } } } } });
 }
 
 function renderLapsChart(laps) {
   const ctx = document.getElementById('laps-chart');
   if (!ctx) return;
-
   const labels = laps.map(l => `${l.index}`);
-  // Convert pace "mm:ss" to seconds for Y axis
-  const paceToSec = p => {
-    if (!p) return 0;
-    const parts = p.split(':');
-    return parseInt(parts[0]) * 60 + parseInt(parts[1]);
-  };
+  const paceToSec = p => { if (!p) return 0; const pts = p.split(':'); return parseInt(pts[0]) * 60 + parseInt(pts[1]); };
   const paceData = laps.map(l => paceToSec(l.pace));
   const hrData = laps.map(l => l.avg_hr || 0);
   const durations = laps.map(l => l.moving_time);
-
-  // Color: green=warmup/cooldown (first & last, or >4min), blue=run (<9:30/km), orange=walk (>=9:30/km)
   const bgColors = laps.map((l, i) => {
     const sec = paceToSec(l.pace);
-    if (i === 0 || i === laps.length - 1 || l.moving_time > 240) {
-      return 'rgba(76, 175, 80, 0.7)';  // green — warmup/cooldown
-    }
-    if (sec < 570) { // faster than 9:30/km
-      return 'rgba(66, 165, 245, 0.7)';  // blue — run
-    }
-    return 'rgba(255, 152, 0, 0.7)';     // orange — walk
+    if (i === 0 || i === laps.length - 1 || l.moving_time > 240) return 'rgba(76,175,80,0.7)';
+    if (sec < 570) return 'rgba(66,165,245,0.7)';
+    return 'rgba(255,152,0,0.7)';
   });
-
-  new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [
-        {
-          label: 'Ritmo (s/km)',
-          data: paceData,
-          backgroundColor: bgColors,
-          borderColor: bgColors,
-          borderWidth: 1,
-          yAxisID: 'y',
-          order: 2,
-        },
-        {
-          label: 'FC (bpm)',
-          data: hrData,
-          type: 'line',
-          borderColor: 'rgba(244, 67, 54, 1)',
-          backgroundColor: 'rgba(244, 67, 54, 0.1)',
-          borderWidth: 2,
-          pointRadius: 3,
-          fill: false,
-          yAxisID: 'y1',
-          order: 1,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { labels: { color: '#e0e0e0' } },
-        tooltip: {
-          callbacks: {
-            afterLabel: (ctx) => {
-              if (ctx.datasetIndex === 0) {
-                return `Duração: ${formatDuration(durations[ctx.dataIndex])}`;
-              }
-              return '';
-            },
-          },
-        },
-      },
-      scales: {
-        x: {
-          title: { display: true, text: 'Etapa', color: '#aaa' },
-          ticks: { color: '#aaa' },
-          grid: { color: 'rgba(255,255,255,0.1)' },
-        },
-        y: {
-          position: 'left',
-          title: { display: true, text: 'Ritmo (min/km)', color: '#aaa' },
-          ticks: {
-            color: '#aaa',
-            callback: v => {
-              const m = Math.floor(v / 60);
-              const s = Math.round(v % 60);
-              return `${m}:${String(s).padStart(2, '0')}`;
-            },
-          },
-          grid: { color: 'rgba(255,255,255,0.1)' },
-        },
-        y1: {
-          position: 'right',
-          title: { display: true, text: 'FC (bpm)', color: '#aaa' },
-          ticks: { color: '#aaa' },
-          grid: { display: false },
-        },
-      },
-    },
-  });
+  new Chart(ctx, { type: 'bar', data: { labels, datasets: [
+    { label: 'Ritmo (s/km)', data: paceData, backgroundColor: bgColors, borderColor: bgColors, borderWidth: 1, yAxisID: 'y', order: 2 },
+    { label: 'FC (bpm)', data: hrData, type: 'line', borderColor: 'rgba(244,67,54,1)', backgroundColor: 'rgba(244,67,54,0.1)', borderWidth: 2, pointRadius: 3, fill: false, yAxisID: 'y1', order: 1 },
+  ]}, options: { responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { labels: { color: 'var(--text)' } }, tooltip: { callbacks: { afterLabel: (c) => c.datasetIndex === 0 ? `Duração: ${formatDuration(durations[c.dataIndex])}` : '' } } },
+    scales: { x: { title: { display: true, text: 'Etapa', color: '#aaa' }, ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.1)' } },
+      y: { position: 'left', title: { display: true, text: 'Ritmo (min/km)', color: '#aaa' }, ticks: { color: '#aaa', callback: v => { const m = Math.floor(v/60); const s = Math.round(v%60); return `${m}:${String(s).padStart(2,'0')}`; } }, grid: { color: 'rgba(255,255,255,0.1)' } },
+      y1: { position: 'right', title: { display: true, text: 'FC (bpm)', color: '#aaa' }, ticks: { color: '#aaa' }, grid: { display: false } } } } });
 }
 
 function renderHRZones(hrZones) {
   const canvas = document.getElementById('hr-donut');
   const legend = document.getElementById('hr-legend');
   if (!canvas || !legend) return;
-
   const zoneConfig = [
-    { label: 'Z1 Repouso',  color: '#4caf50' },
-    { label: 'Z2 Aeróbio',  color: '#42a5f5' },
-    { label: 'Z3 Limiar',   color: '#ff9800' },
-    { label: 'Z4 Intenso',  color: '#f44336' },
-    { label: 'Z5 Máximo',   color: '#9c27b0' },
+    { label: 'Z1 Repouso', color: '#4caf50' }, { label: 'Z2 Aeróbio', color: '#42a5f5' },
+    { label: 'Z3 Limiar', color: '#ff9800' }, { label: 'Z4 Intenso', color: '#f44336' }, { label: 'Z5 Máximo', color: '#9c27b0' },
   ];
-
   const zones = (hrZones && hrZones.length > 0) ? hrZones : [];
   if (!zones.length) return;
-
   const data = zones.map(z => z.percent);
   const colors = zones.map((_, i) => zoneConfig[i]?.color || '#888');
-
-  new Chart(canvas, {
-    type: 'doughnut',
-    data: {
-      labels: zones.map((z, i) => zoneConfig[i]?.label || z.name),
-      datasets: [{
-        data,
-        backgroundColor: colors,
-        borderColor: '#1a1a2e',
-        borderWidth: 3,
-        hoverBorderWidth: 0,
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: true,
-      cutout: '65%',
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: (ctx) => {
-              const z = zones[ctx.dataIndex];
-              return ` ${ctx.label}: ${z.percent}% (${formatDuration(z.seconds)})`;
-            },
-          },
-        },
-      },
-    },
-  });
-
-  // Custom legend with time
+  new Chart(canvas, { type: 'doughnut', data: { labels: zones.map((z, i) => zoneConfig[i]?.label || z.name),
+    datasets: [{ data, backgroundColor: colors, borderColor: 'var(--surface)', borderWidth: 3, hoverBorderWidth: 0 }] },
+    options: { responsive: true, maintainAspectRatio: true, cutout: '65%',
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => { const z = zones[c.dataIndex]; return ` ${c.label}: ${z.percent}% (${formatDuration(z.seconds)})`; } } } } } });
   legend.innerHTML = zones.map((z, i) => {
     const cfg = zoneConfig[i] || { label: z.name, color: '#888' };
     const bpm = z.max > 900 ? `${z.min}+` : `${z.min}–${z.max}`;
     const time = z.seconds > 0 ? formatDuration(z.seconds) : '–';
-    return `
-      <div class="hr-legend-item">
-        <span class="hr-legend-dot" style="background:${cfg.color}"></span>
-        <span class="hr-legend-label">${cfg.label}</span>
-        <span class="hr-legend-bpm">${bpm}</span>
-        <span class="hr-legend-time">${time}</span>
-        <span class="hr-legend-pct" style="color:${cfg.color}">${z.percent}%</span>
-      </div>`;
+    return `<div class="hr-legend-item"><span class="hr-legend-dot" style="background:${cfg.color}"></span><span class="hr-legend-label">${cfg.label}</span><span class="hr-legend-bpm">${bpm}</span><span class="hr-legend-time">${time}</span><span class="hr-legend-pct" style="color:${cfg.color}">${z.percent}%</span></div>`;
   }).join('');
 }
 
-// ── History with click-to-expand report (#4) ──────────
+// ── History ───────────────────────────────────────────
 
-function renderHistory(activities) {
+function renderHistory(activities, filterWeek) {
   const container = document.getElementById('history');
-  if (!activities.length) {
-    container.innerHTML = '';
-    return;
-  }
+  let filtered = activities;
+  if (filterWeek) filtered = activities.filter(a => a.plan_week === filterWeek);
+  if (!filtered.length) { container.innerHTML = filterWeek ? `<div class="card"><p style="color:var(--text-muted);padding:8px">Sem corridas na semana ${filterWeek}.</p></div>` : ''; return; }
 
   container.innerHTML = `
     <div class="card">
-      <div class="card-title">Histórico de Corridas</div>
-      <table class="history-table">
-        <thead>
-          <tr>
-            <th>Data</th>
-            <th>Sessão</th>
-            <th>Plano</th>
-            <th>Distância</th>
-            <th>Tempo</th>
-            <th>Ritmo</th>
-            <th>FC</th>
+      <div class="card-title">Histórico de Corridas ${filterWeek ? `— Semana ${filterWeek} <button class="btn-clear-filter" id="clear-filter">Limpar filtro</button>` : ''}</div>
+      <table class="history-table"><thead><tr>
+        <th>Data</th><th>Sessão</th><th>Plano</th><th>Distância</th><th>Tempo</th><th>Ritmo</th><th>FC</th>
+      </tr></thead><tbody>
+        ${filtered.map(a => `
+          <tr class="history-row" data-activity-id="${a.id}" style="cursor:pointer" title="Clica para ver o relatório">
+            <td>${formatDate(a.date)}</td>
+            <td>${a.name} <a href="https://www.strava.com/activities/${a.strava_id}" target="_blank" class="strava-link" onclick="event.stopPropagation()">🔗</a></td>
+            <td>${a.plan_session || '—'}</td>
+            <td>${formatDistance(a.distance)} km</td>
+            <td>${formatDuration(a.moving_time)}</td>
+            <td>${a.avg_pace}/km</td>
+            <td>${Math.round(a.avg_hr)} bpm</td>
           </tr>
-        </thead>
-        <tbody>
-          ${activities.map(a => `
-            <tr class="history-row" data-activity-id="${a.id}" style="cursor:pointer" title="Clica para ver o relatório">
-              <td>${formatDate(a.date)}</td>
-              <td>${a.name} <a href="https://www.strava.com/activities/${a.strava_id}" target="_blank" class="strava-link" onclick="event.stopPropagation()" title="Ver no Strava">🔗</a></td>
-              <td>${a.plan_session || '—'}</td>
-              <td>${formatDistance(a.distance)} km</td>
-              <td>${formatDuration(a.moving_time)}</td>
-              <td>${a.avg_pace}/km</td>
-              <td>${Math.round(a.avg_hr)} bpm</td>
-            </tr>
-            <tr class="report-row" id="report-${a.id}" style="display:none">
-              <td colspan="7">
-                <div class="report-expand loading"><div class="spinner"></div></div>
-              </td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
+          <tr class="report-row" id="report-${a.id}" style="display:none">
+            <td colspan="7"><div class="report-expand loading"><div class="spinner"></div></div></td>
+          </tr>`).join('')}
+      </tbody></table>
     </div>`;
 
-  // Click handlers
   container.querySelectorAll('.history-row').forEach(row => {
     row.addEventListener('click', () => toggleReport(row.dataset.activityId));
   });
+
+  const clearBtn = document.getElementById('clear-filter');
+  if (clearBtn) clearBtn.addEventListener('click', () => renderHistory(allActivities));
 }
+
+let allActivities = [];
 
 async function toggleReport(activityId) {
   const reportRow = document.getElementById(`report-${activityId}`);
   if (!reportRow) return;
-
-  if (reportRow.style.display !== 'none') {
-    reportRow.style.display = 'none';
-    return;
-  }
-
+  if (reportRow.style.display !== 'none') { reportRow.style.display = 'none'; return; }
   reportRow.style.display = '';
   const cell = reportRow.querySelector('td');
-
   const report = await fetchJSON(`/api/reports/${activityId}`);
-  if (report) {
-    cell.innerHTML = `<div class="report-expand report-text">${md(report.report_text)}</div>`;
-  } else {
-    cell.innerHTML = `<div class="report-expand" style="color:var(--text-muted);padding:12px">Sem relatório para esta corrida.</div>`;
-  }
+  cell.innerHTML = report
+    ? `<div class="report-expand report-text">${md(report.report_text)}</div>`
+    : `<div class="report-expand" style="color:var(--text-muted);padding:12px">Sem relatório para esta corrida.</div>`;
 }
 
-// ── Plan Tab (dynamic, #3 + #5) ───────────────────────
+// ── Plan Tab ──────────────────────────────────────────
 
 async function loadPlan() {
   const planStatus = await fetchJSON('/api/plan/status');
   renderPlan(planStatus);
 }
 
-function sessionIcon(status) {
-  switch (status) {
-    case 'done': return '✅';
-    case 'missed': return '❌';
-    case 'upcoming': return '⬜';
-    case 'na': return '➖';
-    default: return '⬜';
-  }
-}
-
-function sessionTypeIcon(type) {
-  return type === 'run' ? '🏃' : '💪';
-}
+function sessionIcon(s) { return { done: '✅', missed: '❌', upcoming: '⬜', na: '➖' }[s] || '⬜'; }
+function sessionTypeIcon(t) { return t === 'run' ? '🏃' : '💪'; }
 
 function renderPlan(plan) {
   const panel = document.getElementById('plan');
-
-  if (!plan) {
-    panel.innerHTML = '<div class="empty-state"><p>Plano de treino não disponível.</p></div>';
-    return;
-  }
+  if (!plan) { panel.innerHTML = '<div class="empty-state"><p>Plano não disponível.</p></div>'; return; }
 
   panel.innerHTML = `
     <div class="card plan-progress">
-      <div class="card-title">Progresso do Plano</div>
-      <div class="progress-bar">
-        <div class="progress-fill" style="width:${plan.progress}%"></div>
-      </div>
-      <div class="progress-label">
-        <span>Semana ${plan.current_week} de ${plan.total_weeks}</span>
-        <span>${plan.progress}%</span>
-      </div>
+      <div class="card-title">${plan.name || 'Plano de Treino'}${plan.goal ? ` — ${plan.goal}` : ''}</div>
+      <div class="progress-bar"><div class="progress-fill" style="width:${plan.progress}%"></div></div>
+      <div class="progress-label"><span>Semana ${plan.current_week} de ${plan.total_weeks}</span><span>${plan.progress}%</span></div>
     </div>
-
     <div class="week-grid">
       ${plan.weeks.map(w => `
-        <div class="week-card ${w.status === 'current' ? 'week-current' : ''}">
+        <div class="week-card ${w.status === 'current' ? 'week-current' : ''} ${w.status === 'done' ? 'week-clickable' : ''}" ${w.status === 'done' ? `data-week="${w.week}"` : ''}>
           <div class="week-header">
             <span class="week-title">Semana ${w.week}</span>
             <span class="week-status ${w.status}">
@@ -569,8 +374,7 @@ function renderPlan(plan) {
               <div class="session-item ${s.status}">
                 ${s.type === 'strength'
                   ? `<input type="checkbox" class="strength-check" data-week="${w.week}" ${s.status === 'done' ? 'checked' : ''} title="Marcar como feito">`
-                  : `<span class="session-icon">${sessionIcon(s.status)}</span>`
-                }
+                  : `<span class="session-icon">${sessionIcon(s.status)}</span>`}
                 <span class="session-type">${sessionTypeIcon(s.type)}</span>
                 <span class="session-day">${s.day}</span>
                 <span class="session-desc">${s.description}</span>
@@ -582,33 +386,105 @@ function renderPlan(plan) {
 
   // Strength checkboxes
   panel.querySelectorAll('.strength-check').forEach(cb => {
-    cb.addEventListener('change', async () => {
-      const week = cb.dataset.week;
-      await fetch(`${API}/api/plan/toggle-strength?week=${week}`, { method: 'POST' });
-      loadPlan(); // refresh
+    cb.addEventListener('change', async (e) => {
+      e.stopPropagation();
+      await fetch(`${API}/api/plan/toggle-strength?week=${cb.dataset.week}`, { method: 'POST' });
+      loadPlan();
     });
   });
 
-  // Click on 📊 to switch to dashboard and show report
+  // Click completed week → filter history (#8)
+  panel.querySelectorAll('.week-clickable').forEach(el => {
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.strength-check, .session-link')) return;
+      const week = parseInt(el.dataset.week);
+      switchTab('dashboard');
+      renderHistory(allActivities, week);
+      document.getElementById('history').scrollIntoView({ behavior: 'smooth' });
+    });
+  });
+
+  // Click 📊 → show report
   panel.querySelectorAll('.session-link').forEach(el => {
     el.style.cursor = 'pointer';
     el.addEventListener('click', (e) => {
       e.stopPropagation();
-      // Switch to dashboard tab
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-      document.querySelector('[data-tab="dashboard"]').classList.add('active');
-      document.getElementById('dashboard').classList.add('active');
-      // Toggle report in history
+      switchTab('dashboard');
       toggleReport(el.dataset.id);
-      // Scroll to it
-      const reportRow = document.getElementById(`report-${el.dataset.id}`);
-      if (reportRow) setTimeout(() => reportRow.scrollIntoView({ behavior: 'smooth' }), 300);
+      const row = document.getElementById(`report-${el.dataset.id}`);
+      if (row) setTimeout(() => row.scrollIntoView({ behavior: 'smooth' }), 300);
     });
   });
 }
 
+// ── Health/System Tab (#12) ───────────────────────────
+
+async function loadHealth() {
+  const [health, events] = await Promise.all([
+    fetchJSON('/api/health/detail'),
+    fetchJSON('/api/events'),
+  ]);
+  renderHealth(health, events);
+}
+
+function renderHealth(health, events) {
+  const panel = document.getElementById('health');
+  if (!health) { panel.innerHTML = '<div class="empty-state"><p>Sem dados.</p></div>'; return; }
+
+  const tokenExpiry = health.strava_token_expires ? new Date(health.strava_token_expires) : null;
+  const tokenOk = tokenExpiry && tokenExpiry > new Date();
+  const lastRun = health.last_run && health.last_run !== '0001-01-01T00:00:00Z' ? timeAgo(health.last_run) : 'nunca';
+
+  panel.innerHTML = `
+    <div class="card">
+      <div class="card-title">Estado do Sistema</div>
+      <div class="health-grid">
+        <div class="health-item">
+          <span class="health-icon">${tokenOk ? '🟢' : '🔴'}</span>
+          <div><strong>Token Strava</strong><br><span class="health-detail">${tokenExpiry ? `Expira: ${tokenExpiry.toLocaleString('pt-PT')}` : 'Não definido'}</span></div>
+        </div>
+        <div class="health-item">
+          <span class="health-icon">${health.last_result === 'success' ? '🟢' : health.last_result === 'error' ? '🔴' : '⚪'}</span>
+          <div><strong>Último pipeline</strong><br><span class="health-detail">${lastRun} — ${health.last_result || 'sem execuções'}</span></div>
+        </div>
+        <div class="health-item">
+          <span class="health-icon">📅</span>
+          <div><strong>Plano</strong><br><span class="health-detail">Semana ${health.plan_week} de ${health.plan_total_weeks}</span></div>
+        </div>
+        <div class="health-item">
+          <span class="health-icon">${health.running ? '⏳' : '💤'}</span>
+          <div><strong>Pipeline</strong><br><span class="health-detail">${health.running ? `A correr (${health.step || '...'})` : 'Inativo'}</span></div>
+        </div>
+      </div>
+      ${health.last_error ? `<div class="health-error"><strong>Último erro:</strong> ${health.last_error}</div>` : ''}
+    </div>
+
+    <div class="card">
+      <div class="card-title">Registo de Eventos</div>
+      ${events && events.length > 0 ? `
+      <div class="events-list">
+        ${events.map(e => `
+          <div class="event-item ${e.type}">
+            <span class="event-icon">${e.type === 'success' ? '✅' : e.type === 'error' ? '❌' : e.type === 'nudge' ? '💬' : 'ℹ️'}</span>
+            <span class="event-msg">${e.message}</span>
+            <span class="event-time">${timeAgo(e.created_at)}</span>
+            ${e.detail ? `<div class="event-detail">${e.detail}</div>` : ''}
+          </div>`).join('')}
+      </div>` : '<p style="color:var(--text-muted)">Sem eventos registados.</p>'}
+    </div>`;
+}
+
 // ── Init ──────────────────────────────────────────────
 
-loadDashboard();
-loadPlan();
+async function init() {
+  const [, , activities] = await Promise.all([
+    loadDashboard(),
+    loadPlan(),
+    fetchJSON('/api/activities?limit=50'),
+  ]);
+  allActivities = activities || [];
+  loadHealth();
+}
+
+init();

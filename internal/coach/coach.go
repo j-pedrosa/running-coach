@@ -15,6 +15,7 @@ import (
 	"github.com/j-pedrosa/running-coach/internal/chart"
 	"github.com/j-pedrosa/running-coach/internal/claude"
 	"github.com/j-pedrosa/running-coach/internal/models"
+	"github.com/j-pedrosa/running-coach/internal/retry"
 	"github.com/j-pedrosa/running-coach/internal/strava"
 	"github.com/j-pedrosa/running-coach/internal/telegram"
 )
@@ -27,6 +28,7 @@ var ErrNoNewActivity = errors.New("no new activity to report")
 
 type Status struct {
 	Running   bool      `json:"running"`
+	Step      string    `json:"step,omitempty"`
 	LastRun   time.Time `json:"last_run,omitempty"`
 	LastError string    `json:"last_error,omitempty"`
 	Result    string    `json:"result,omitempty"`
@@ -52,6 +54,7 @@ type Store interface {
 	SaveActivity(ctx context.Context, a *models.Activity) error
 	GetActivity(ctx context.Context, stravaID int64) (*models.Activity, error)
 	SaveReport(ctx context.Context, r *models.Report) error
+	LogEvent(ctx context.Context, eventType, message, detail string) error
 }
 
 func New(
@@ -76,6 +79,36 @@ func New(
 }
 
 func (c *Coach) GetPlanConfig() *PlanConfig { return c.planConfig }
+
+func (c *Coach) setStep(step string) {
+	c.mu.Lock()
+	c.status.Step = step
+	c.mu.Unlock()
+}
+
+// SendNudge sends a motivational message the evening before a run day.
+func (c *Coach) SendNudge(ctx context.Context) error {
+	tomorrow := time.Now().Add(24 * time.Hour)
+	day := tomorrow.Weekday()
+
+	var session string
+	if c.planConfig != nil {
+		week := c.planConfig.CurrentWeek()
+		session = c.planConfig.RunDesc(week, day)
+	}
+
+	msg := fmt.Sprintf("🏃 <b>Amanhã é dia de corrida!</b>\n\n")
+	if session != "" {
+		msg += fmt.Sprintf("Sessão planeada: <b>%s</b>\n\n", session)
+	}
+	msg += "Prepara a roupa, carrega o relógio, e descansa bem esta noite. 💪"
+
+	if err := c.telegram.SendMessage(ctx, msg); err != nil {
+		return fmt.Errorf("sending nudge: %w", err)
+	}
+	c.store.LogEvent(ctx, "nudge", "Motivational nudge sent", fmt.Sprintf("Tomorrow: %s", dayName(day)))
+	return nil
+}
 
 func (c *Coach) GetStatus() Status {
 	c.mu.Lock()
@@ -157,9 +190,13 @@ func (c *Coach) Run(ctx context.Context, force bool) error {
 	if err != nil {
 		c.status.LastError = err.Error()
 		c.status.Result = "error"
+		c.status.Step = ""
+		c.store.LogEvent(ctx, "error", "Pipeline failed", err.Error())
 	} else {
 		c.status.LastError = ""
 		c.status.Result = "success"
+		c.status.Step = ""
+		c.store.LogEvent(ctx, "success", "Coaching report generated", "")
 	}
 	c.mu.Unlock()
 	return err
@@ -167,8 +204,14 @@ func (c *Coach) Run(ctx context.Context, force bool) error {
 
 func (c *Coach) run(ctx context.Context, force bool) error {
 	// 1. Fetch latest activity from Strava
+	c.setStep("strava")
 	c.logger.Info("fetching latest activity from Strava")
-	latest, err := c.strava.GetLatestActivity(ctx)
+	var latest *strava.ActivitySummary
+	err := retry.Do(ctx, c.logger, "strava-latest", 2, func() error {
+		var e error
+		latest, e = c.strava.GetLatestActivity(ctx)
+		return e
+	})
 	if err != nil {
 		return fmt.Errorf("fetching latest activity: %w", err)
 	}
@@ -186,8 +229,15 @@ func (c *Coach) run(ctx context.Context, force bool) error {
 	}
 
 	// 3. Fetch full activity detail + streams
+	c.setStep("strava-detail")
 	c.logger.Info("fetching activity detail", "strava_id", latest.ID, "name", latest.Name)
-	activity, rawJSON, err := c.strava.FetchFullActivity(ctx, latest.ID)
+	var activity *models.Activity
+	var rawJSON string
+	err = retry.Do(ctx, c.logger, "strava-detail", 2, func() error {
+		var e error
+		activity, rawJSON, e = c.strava.FetchFullActivity(ctx, latest.ID)
+		return e
+	})
 	if err != nil {
 		return fmt.Errorf("fetching full activity: %w", err)
 	}
@@ -204,13 +254,20 @@ func (c *Coach) run(ctx context.Context, force bool) error {
 	userMessage := c.buildUserMessage(activity)
 
 	// 6. Send to Claude
+	c.setStep("claude")
 	c.logger.Info("generating coaching report via Claude")
-	result, err := c.claude.SendMessage(ctx, systemPrompt, userMessage)
+	var result *claude.Result
+	err = retry.Do(ctx, c.logger, "claude", 2, func() error {
+		var e error
+		result, e = c.claude.SendMessage(ctx, systemPrompt, userMessage)
+		return e
+	})
 	if err != nil {
 		return fmt.Errorf("generating report: %w", err)
 	}
 
 	// 7. Generate chart
+	c.setStep("chart")
 	var chartURL, chartConfig string
 	if len(activity.Splits) > 0 {
 		c.logger.Info("generating splits chart")
@@ -235,6 +292,7 @@ func (c *Coach) run(ctx context.Context, force bool) error {
 	}
 
 	// 9. Send to Telegram
+	c.setStep("telegram")
 	c.logger.Info("sending report to Telegram")
 	if chartURL != "" {
 		caption := fmt.Sprintf("📊 Splits — %s (%s)", activity.Name, activity.Date.Format("02 Jan"))

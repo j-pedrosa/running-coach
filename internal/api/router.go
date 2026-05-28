@@ -24,6 +24,8 @@ func NewRouter(logger *slog.Logger, st *store.Store, c *coach.Coach, webFS fs.FS
 	mux.HandleFunc("GET /api/plan/status", h.handlePlanStatus)
 	mux.HandleFunc("POST /api/plan/toggle-strength", h.handleToggleStrength)
 	mux.HandleFunc("GET /api/reports/{activityID}", h.handleReportByActivity)
+	mux.HandleFunc("GET /api/events", h.handleEvents)
+	mux.HandleFunc("GET /api/health/detail", h.handleHealthDetail)
 	mux.HandleFunc("GET /api/athlete", h.handleAthlete)
 
 	if webFS != nil {

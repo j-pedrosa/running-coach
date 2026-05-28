@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="pt">
+<html lang="pt" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,12 +10,27 @@
 <body>
   <div class="header">
     <h1><span>🏃</span> Running Coach</h1>
-    <button class="btn btn-primary" id="run-btn">Run Now</button>
+    <div class="header-actions">
+      <button class="btn btn-icon" id="theme-btn" title="Alternar tema">🌙</button>
+      <button class="btn btn-primary" id="run-btn">Run Now</button>
+    </div>
+  </div>
+
+  <!-- Pipeline progress bar -->
+  <div class="pipeline-bar" id="pipeline-bar" style="display:none">
+    <div class="pipeline-steps">
+      <span class="pipe-step" data-step="strava">Strava</span>
+      <span class="pipe-step" data-step="strava-detail">Detalhes</span>
+      <span class="pipe-step" data-step="claude">Claude AI</span>
+      <span class="pipe-step" data-step="chart">Gráfico</span>
+      <span class="pipe-step" data-step="telegram">Telegram</span>
+    </div>
   </div>
 
   <div class="tabs">
     <div class="tab active" data-tab="dashboard">🏃 Última Corrida</div>
-    <div class="tab" data-tab="plan">📋 Plano de Treino</div>
+    <div class="tab" data-tab="plan">📋 Plano</div>
+    <div class="tab" data-tab="health">⚙️ Sistema</div>
   </div>
 
   <div class="content">
@@ -27,6 +42,10 @@
     </div>
 
     <div class="tab-panel" id="plan">
+      <div class="loading"><div class="spinner"></div><p>A carregar...</p></div>
+    </div>
+
+    <div class="tab-panel" id="health">
       <div class="loading"><div class="spinner"></div><p>A carregar...</p></div>
     </div>
   </div>
