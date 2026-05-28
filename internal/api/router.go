@@ -25,6 +25,12 @@ func NewRouter(logger *slog.Logger, st *store.Store, c *coach.Coach, webFS fs.FS
 	mux.HandleFunc("POST /api/plan/toggle-strength", h.handleToggleStrength)
 	mux.HandleFunc("GET /api/reports/{activityID}", h.handleReportByActivity)
 	mux.HandleFunc("GET /api/events", h.handleEvents)
+	mux.HandleFunc("POST /api/chat", h.handleChat)
+	mux.HandleFunc("POST /api/chat/apply", h.handleApplyProposal)
+	mux.HandleFunc("GET /api/plans", h.handleListPlans)
+	mux.HandleFunc("POST /api/plan/{id}/archive", h.handleArchivePlan)
+	mux.HandleFunc("GET /api/athlete/profile", h.handleGetAthleteProfile)
+	mux.HandleFunc("PUT /api/athlete/profile", h.handleUpdateAthleteProfile)
 	mux.HandleFunc("GET /api/health/detail", h.handleHealthDetail)
 	mux.HandleFunc("GET /api/athlete", h.handleAthlete)
 

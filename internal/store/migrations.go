@@ -58,6 +58,46 @@ var migrations = []string{
 		detail     TEXT,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);`,
+
+	// v5: plans, plan weeks, strength sessions, athlete profiles in DB
+	`CREATE TABLE IF NOT EXISTS plans (
+		id           INTEGER PRIMARY KEY AUTOINCREMENT,
+		name         TEXT NOT NULL,
+		start_date   TEXT NOT NULL,
+		total_weeks  INTEGER NOT NULL,
+		goal         TEXT DEFAULT '',
+		goal_km      REAL DEFAULT 0,
+		schedule     TEXT DEFAULT '',
+		notes        TEXT DEFAULT '',
+		status       TEXT DEFAULT 'active',
+		created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+		archived_at  DATETIME
+	);
+
+	CREATE TABLE IF NOT EXISTS plan_weeks (
+		id              INTEGER PRIMARY KEY AUTOINCREMENT,
+		plan_id         INTEGER NOT NULL REFERENCES plans(id),
+		week_number     INTEGER NOT NULL,
+		saturday_desc   TEXT DEFAULT '',
+		monday_desc     TEXT DEFAULT '',
+		wednesday_desc  TEXT DEFAULT '',
+		UNIQUE(plan_id, week_number)
+	);
+
+	CREATE TABLE IF NOT EXISTS strength_sessions (
+		id           INTEGER PRIMARY KEY AUTOINCREMENT,
+		plan_id      INTEGER NOT NULL REFERENCES plans(id),
+		week_number  INTEGER NOT NULL,
+		done         BOOLEAN DEFAULT FALSE,
+		updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(plan_id, week_number)
+	);
+
+	CREATE TABLE IF NOT EXISTS athlete_profiles (
+		id           INTEGER PRIMARY KEY AUTOINCREMENT,
+		content      TEXT NOT NULL,
+		updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+	);`,
 }
 
 func (s *Store) Migrate(ctx context.Context) error {

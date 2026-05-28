@@ -6,20 +6,6 @@ async function fetchJSON(path) {
   return resp.json();
 }
 
-// ── Theme toggle (#7) ─────────────────────────────────
-
-const themeBtn = document.getElementById('theme-btn');
-function setTheme(theme) {
-  document.documentElement.setAttribute('data-theme', theme);
-  themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
-  localStorage.setItem('theme', theme);
-}
-themeBtn.addEventListener('click', () => {
-  const current = document.documentElement.getAttribute('data-theme');
-  setTheme(current === 'dark' ? 'light' : 'dark');
-});
-setTheme(localStorage.getItem('theme') || 'dark');
-
 // ── Tab switching ─────────────────────────────────────
 
 function switchTab(tabName) {
@@ -233,8 +219,8 @@ function renderSplitsChart(splits) {
   const bgColors = splits.map(s => s.avg_hr > 0 && s.avg_hr < 110 ? 'rgba(76,175,80,0.7)' : 'rgba(66,165,245,0.7)');
   new Chart(ctx, { type: 'bar', data: { labels, datasets: [
     { label: 'Ritmo (s/km)', data: paceData, backgroundColor: bgColors, borderColor: bgColors, borderWidth: 1, yAxisID: 'y', order: 2 },
-    { label: 'FC (bpm)', data: hrData, type: 'line', borderColor: 'rgba(255,152,0,1)', backgroundColor: 'rgba(255,152,0,0.1)', borderWidth: 2, pointRadius: 4, fill: false, yAxisID: 'y1', order: 1 },
-  ]}, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: 'var(--text)' } } },
+    { label: 'FC (bpm)', data: hrData, type: 'line', borderColor: 'rgba(255,152,0,1)', backgroundColor: 'rgba(255,152,0,1)', borderWidth: 2, pointRadius: 4, fill: false, yAxisID: 'y1', order: 1 },
+  ]}, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#e0e0e0', usePointStyle: true, pointStyle: 'circle' } } },
     scales: { x: { ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.1)' } },
       y: { position: 'left', title: { display: true, text: 'Ritmo (s/km)', color: '#aaa' }, ticks: { color: '#aaa', callback: v => { const m = Math.floor(v/60); const s = Math.round(v%60); return `${m}:${String(s).padStart(2,'0')}`; } }, grid: { color: 'rgba(255,255,255,0.1)' } },
       y1: { position: 'right', title: { display: true, text: 'FC (bpm)', color: '#aaa' }, ticks: { color: '#aaa' }, grid: { display: false } } } } });
@@ -256,9 +242,9 @@ function renderLapsChart(laps) {
   });
   new Chart(ctx, { type: 'bar', data: { labels, datasets: [
     { label: 'Ritmo (s/km)', data: paceData, backgroundColor: bgColors, borderColor: bgColors, borderWidth: 1, yAxisID: 'y', order: 2 },
-    { label: 'FC (bpm)', data: hrData, type: 'line', borderColor: 'rgba(244,67,54,1)', backgroundColor: 'rgba(244,67,54,0.1)', borderWidth: 2, pointRadius: 3, fill: false, yAxisID: 'y1', order: 1 },
+    { label: 'FC (bpm)', data: hrData, type: 'line', borderColor: 'rgba(244,67,54,1)', backgroundColor: 'rgba(244,67,54,1)', borderWidth: 2, pointRadius: 3, fill: false, yAxisID: 'y1', order: 1 },
   ]}, options: { responsive: true, maintainAspectRatio: false,
-    plugins: { legend: { labels: { color: 'var(--text)' } }, tooltip: { callbacks: { afterLabel: (c) => c.datasetIndex === 0 ? `Duração: ${formatDuration(durations[c.dataIndex])}` : '' } } },
+    plugins: { legend: { labels: { color: '#e0e0e0', usePointStyle: true, pointStyle: 'circle' } }, tooltip: { callbacks: { afterLabel: (c) => c.datasetIndex === 0 ? `Duração: ${formatDuration(durations[c.dataIndex])}` : '' } } },
     scales: { x: { title: { display: true, text: 'Etapa', color: '#aaa' }, ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.1)' } },
       y: { position: 'left', title: { display: true, text: 'Ritmo (min/km)', color: '#aaa' }, ticks: { color: '#aaa', callback: v => { const m = Math.floor(v/60); const s = Math.round(v%60); return `${m}:${String(s).padStart(2,'0')}`; } }, grid: { color: 'rgba(255,255,255,0.1)' } },
       y1: { position: 'right', title: { display: true, text: 'FC (bpm)', color: '#aaa' }, ticks: { color: '#aaa' }, grid: { display: false } } } } });
@@ -474,6 +460,121 @@ function renderHealth(health, events) {
       </div>` : '<p style="color:var(--text-muted)">Sem eventos registados.</p>'}
     </div>`;
 }
+
+// ── Chat Tab ──────────────────────────────────────────
+
+const chatInput = document.getElementById('chat-input');
+const chatSend = document.getElementById('chat-send');
+const chatMessages = document.getElementById('chat-messages');
+
+async function sendChat() {
+  const msg = chatInput.value.trim();
+  if (!msg) return;
+
+  // Add user message
+  chatMessages.innerHTML += `<div class="chat-msg user"><div class="chat-bubble">${escapeHtml(msg)}</div></div>`;
+  chatInput.value = '';
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+
+  // Show typing indicator
+  const typingId = 'typing-' + Date.now();
+  chatMessages.innerHTML += `<div class="chat-msg bot" id="${typingId}"><div class="chat-bubble typing"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div></div>`;
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+
+  chatSend.disabled = true;
+  chatInput.disabled = true;
+
+  const resp = await fetch(API + '/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: msg }),
+  });
+
+  // Remove typing indicator
+  document.getElementById(typingId)?.remove();
+
+  chatSend.disabled = false;
+  chatInput.disabled = false;
+  chatInput.focus();
+
+  if (resp.ok) {
+    const data = await resp.json();
+    // Parse proposals from reply
+    const { text, proposals } = parseProposals(data.reply);
+    chatMessages.innerHTML += `<div class="chat-msg bot"><div class="chat-bubble">${md(text)}</div></div>`;
+
+    // Show confirm cards for proposals
+    for (const proposal of proposals) {
+      const pid = 'proposal-' + Date.now() + Math.random().toString(36).slice(2, 6);
+      const summary = proposalSummary(proposal);
+      chatMessages.innerHTML += `
+        <div class="chat-msg bot" id="${pid}">
+          <div class="chat-proposal">
+            <div class="proposal-header">O coach sugere alterações:</div>
+            <div class="proposal-summary">${summary}</div>
+            <div class="proposal-actions">
+              <button class="btn btn-primary proposal-apply" data-pid="${pid}">Aplicar</button>
+              <button class="btn proposal-dismiss" data-pid="${pid}">Ignorar</button>
+            </div>
+          </div>
+        </div>`;
+
+      // Store proposal data on the DOM element
+      setTimeout(() => {
+        const el = document.getElementById(pid);
+        if (!el) return;
+        el.querySelector('.proposal-apply').addEventListener('click', async () => {
+          el.querySelector('.proposal-actions').innerHTML = '<span class="proposal-loading">A aplicar...</span>';
+          const r = await fetch(API + '/api/chat/apply', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(proposal),
+          });
+          if (r.ok) {
+            el.querySelector('.proposal-actions').innerHTML = '<span style="color:var(--success)">Aplicado!</span>';
+            loadPlan(); // refresh plan tab
+          } else {
+            el.querySelector('.proposal-actions').innerHTML = '<span style="color:var(--accent2)">Erro ao aplicar.</span>';
+          }
+        });
+        el.querySelector('.proposal-dismiss')?.addEventListener('click', () => {
+          el.innerHTML = '<div class="chat-proposal" style="opacity:0.5"><span>Alteração ignorada.</span></div>';
+        });
+      }, 0);
+    }
+  } else {
+    chatMessages.innerHTML += `<div class="chat-msg bot"><div class="chat-bubble" style="color:var(--accent2)">Erro ao obter resposta. Tenta novamente.</div></div>`;
+  }
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function parseProposals(reply) {
+  const proposals = [];
+  const text = reply.replace(/<!--PROPOSAL:(.*?)-->/gs, (_, json) => {
+    try { proposals.push(JSON.parse(json)); } catch (e) {}
+    return '';
+  }).trim();
+  return { text, proposals };
+}
+
+function proposalSummary(p) {
+  switch (p.type) {
+    case 'update_week': return `Atualizar semana ${p.week} do plano`;
+    case 'new_plan': return `Criar novo plano: <strong>${escapeHtml(p.name)}</strong> (${p.total_weeks} semanas)`;
+    case 'update_athlete': return 'Atualizar perfil do atleta';
+    default: return `Alteração: ${p.type}`;
+  }
+}
+
+function escapeHtml(text) {
+  const d = document.createElement('div');
+  d.textContent = text;
+  return d.innerHTML;
+}
+
+chatSend.addEventListener('click', sendChat);
+chatInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+});
 
 // ── Init ──────────────────────────────────────────────
 

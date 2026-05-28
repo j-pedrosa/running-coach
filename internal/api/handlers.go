@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -110,21 +109,18 @@ func (h *handlers) handlePlan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handlers) handlePlanStatus(w http.ResponseWriter, r *http.Request) {
-	activities, err := h.store.ListActivities(r.Context(), 100)
+	ctx := r.Context()
+	activities, err := h.store.ListActivities(ctx, 100)
 	if err != nil {
 		h.logger.Error("listing activities for plan status", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list activities"})
 		return
 	}
 
-	// Load strength done flags from config
 	cfg := h.coach.GetPlanConfig()
 	strengthDone := make(map[int]bool)
-	if cfg != nil {
-		for w := 1; w <= cfg.TotalWeeks; w++ {
-			val, _ := h.store.GetConfig(r.Context(), fmt.Sprintf("strength_done_w%d", w))
-			strengthDone[w] = val == "true"
-		}
+	if cfg != nil && cfg.ID > 0 {
+		strengthDone, _ = h.store.GetStrengthDoneMap(ctx, cfg.ID)
 	}
 
 	status := coach.BuildPlanStatus(cfg, activities, strengthDone)
@@ -134,25 +130,26 @@ func (h *handlers) handlePlanStatus(w http.ResponseWriter, r *http.Request) {
 func (h *handlers) handleToggleStrength(w http.ResponseWriter, r *http.Request) {
 	weekStr := r.URL.Query().Get("week")
 	week, err := strconv.Atoi(weekStr)
-	if err != nil || week < 1 || week > 8 {
+	if err != nil || week < 1 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid week"})
 		return
 	}
 
-	key := fmt.Sprintf("strength_done_w%d", week)
-	current, _ := h.store.GetConfig(r.Context(), key)
-
-	newVal := "true"
-	if current == "true" {
-		newVal = "false"
+	cfg := h.coach.GetPlanConfig()
+	if cfg == nil || cfg.ID == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no active plan"})
+		return
 	}
 
-	if err := h.store.SetConfig(r.Context(), key, newVal); err != nil {
+	current, _ := h.store.GetStrengthDone(r.Context(), cfg.ID, week)
+	newVal := !current
+
+	if err := h.store.SetStrengthDone(r.Context(), cfg.ID, week, newVal); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save"})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"week": week, "done": newVal == "true"})
+	writeJSON(w, http.StatusOK, map[string]any{"week": week, "done": newVal})
 }
 
 func (h *handlers) handleReportByActivity(w http.ResponseWriter, r *http.Request) {
@@ -223,6 +220,89 @@ func (h *handlers) handleHealthDetail(w http.ResponseWriter, r *http.Request) {
 func (h *handlers) handleAthlete(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 	w.Write([]byte(h.coach.GetAthlete()))
+}
+
+func (h *handlers) handleChat(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Message == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "message is required"})
+		return
+	}
+
+	reply, err := h.coach.Chat(r.Context(), req.Message)
+	if err != nil {
+		h.logger.Error("chat failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get response"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"reply": reply})
+}
+
+func (h *handlers) handleApplyProposal(w http.ResponseWriter, r *http.Request) {
+	var proposal json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&proposal); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid proposal"})
+		return
+	}
+
+	if err := h.coach.ApplyProposal(r.Context(), proposal); err != nil {
+		h.logger.Error("apply proposal failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "applied"})
+}
+
+func (h *handlers) handleListPlans(w http.ResponseWriter, r *http.Request) {
+	plans, err := h.store.ListPlans(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list plans"})
+		return
+	}
+	writeJSON(w, http.StatusOK, plans)
+}
+
+func (h *handlers) handleArchivePlan(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid plan ID"})
+		return
+	}
+	if err := h.store.ArchivePlan(r.Context(), id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	h.coach.ReloadPlan(r.Context())
+	writeJSON(w, http.StatusOK, map[string]string{"status": "archived"})
+}
+
+func (h *handlers) handleGetAthleteProfile(w http.ResponseWriter, r *http.Request) {
+	content, err := h.store.GetAthleteProfile(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"content": content})
+}
+
+func (h *handlers) handleUpdateAthleteProfile(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Content == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "content is required"})
+		return
+	}
+	if err := h.coach.UpdateAthlete(r.Context(), req.Content); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

@@ -16,6 +16,7 @@ import (
 	"github.com/j-pedrosa/running-coach/internal/claude"
 	"github.com/j-pedrosa/running-coach/internal/models"
 	"github.com/j-pedrosa/running-coach/internal/retry"
+	"github.com/j-pedrosa/running-coach/internal/store"
 	"github.com/j-pedrosa/running-coach/internal/strava"
 	"github.com/j-pedrosa/running-coach/internal/telegram"
 )
@@ -39,7 +40,7 @@ type Coach struct {
 	claude     *claude.Client
 	telegram   *telegram.Client
 	chart      *chart.Client
-	store      Store
+	store      *store.Store
 	athlete    string
 	planConfig *PlanConfig
 	logger     *slog.Logger
@@ -48,34 +49,72 @@ type Coach struct {
 	status Status
 }
 
-type Store interface {
-	GetConfig(ctx context.Context, key string) (string, error)
-	SetConfig(ctx context.Context, key, value string) error
-	SaveActivity(ctx context.Context, a *models.Activity) error
-	GetActivity(ctx context.Context, stravaID int64) (*models.Activity, error)
-	SaveReport(ctx context.Context, r *models.Report) error
-	LogEvent(ctx context.Context, eventType, message, detail string) error
-}
-
 func New(
 	stravaClient *strava.Client,
 	claudeClient *claude.Client,
 	telegramClient *telegram.Client,
 	chartClient *chart.Client,
-	store Store,
-	planConfig *PlanConfig,
+	st *store.Store,
 	logger *slog.Logger,
 ) *Coach {
+	ctx := context.Background()
+
+	// Load plan from DB, or seed from YAML if empty
+	plan, err := LoadPlanFromDB(ctx, st, logger)
+	if err != nil {
+		logger.Error("failed to load plan from DB", "error", err)
+	}
+	if plan == nil {
+		plan, err = SeedFromYAML(ctx, st, logger)
+		if err != nil {
+			logger.Error("failed to seed plan from YAML", "error", err)
+		}
+	}
+
+	// Load athlete from DB, or seed from file
+	athlete, _ := st.GetAthleteProfile(ctx)
+	if athlete == "" {
+		athlete = loadPrompt("/app/config/athlete.md", defaultAthleteMD)
+		if athlete != defaultAthleteMD {
+			st.SaveAthleteProfile(ctx, athlete)
+			logger.Info("seeded athlete profile from file to database")
+		}
+	}
+
 	return &Coach{
 		strava:     stravaClient,
 		claude:     claudeClient,
 		telegram:   telegramClient,
 		chart:      chartClient,
-		store:      store,
-		planConfig: planConfig,
-		athlete:    loadPrompt("/app/config/athlete.md", defaultAthleteMD),
+		store:      st,
+		planConfig: plan,
+		athlete:    athlete,
 		logger:     logger,
 	}
+}
+
+// ReloadPlan refreshes the plan config from the database.
+func (c *Coach) ReloadPlan(ctx context.Context) error {
+	plan, err := LoadPlanFromDB(ctx, c.store, c.logger)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.planConfig = plan
+	c.mu.Unlock()
+	return nil
+}
+
+// UpdateAthlete saves a new athlete profile to DB and reloads it.
+func (c *Coach) UpdateAthlete(ctx context.Context, content string) error {
+	if err := c.store.SaveAthleteProfile(ctx, content); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.athlete = content
+	c.mu.Unlock()
+	c.store.LogEvent(ctx, "profile", "Athlete profile updated", "")
+	return nil
 }
 
 func (c *Coach) GetPlanConfig() *PlanConfig { return c.planConfig }
@@ -108,6 +147,132 @@ func (c *Coach) SendNudge(ctx context.Context) error {
 	}
 	c.store.LogEvent(ctx, "nudge", "Motivational nudge sent", fmt.Sprintf("Tomorrow: %s", dayName(day)))
 	return nil
+}
+
+// Chat sends a user message to Claude with full athlete/plan/history context.
+func (c *Coach) Chat(ctx context.Context, userMsg string) (string, error) {
+	// Build history summary from recent activities
+	activities, _ := c.store.ListActivities(ctx, 10)
+	var historyLines string
+	for _, a := range activities {
+		historyLines += fmt.Sprintf("- %s (%s): %.2fkm, %s, pace %s/km, HR %.0f/%.0f, %s\n",
+			a.Date.Format("2 Jan"), dayName(a.Date.Weekday()),
+			a.Distance/1000, formatDuration(a.MovingTime),
+			a.AvgPace, a.AvgHR, a.MaxHR, a.PlanSession)
+	}
+
+	planMD := "No plan configured."
+	if c.planConfig != nil {
+		planMD = c.planConfig.ToMarkdown()
+	}
+
+	system := fmt.Sprintf(`You are a personal running coach chatbot. You have full access to the athlete's profile, training plan, and recent run history. Answer questions about their training, progress, health, plan adjustments, and running in general. Be direct, knowledgeable, and supportive. Respond in European Portuguese (pt-PT).
+
+## Athlete Profile
+%s
+
+## Current Training Plan
+%s
+
+## Recent Run History (last 10 sessions)
+%s
+
+## IMPORTANT: Proposing Changes
+You can propose changes to the training plan or athlete profile. When you do, include a JSON block at the END of your response using this exact format:
+
+To update a week in the plan:
+<!--PROPOSAL:{"type":"update_week","week":5,"saturday":"new description","monday":"new description","wednesday":"new description"}-->
+
+To create a completely new plan (archives the current one):
+<!--PROPOSAL:{"type":"new_plan","name":"Plan Name","start_date":"2026-06-28","total_weeks":8,"goal":"Run 10km","goal_km":10,"weeks":{"1":{"saturday":"...","monday":"...","wednesday":"..."}}}-->
+
+To update the athlete profile:
+<!--PROPOSAL:{"type":"update_athlete","content":"full updated markdown content"}-->
+
+Only include PROPOSAL blocks when the user explicitly asks you to change something. Always explain what you're changing in your text response before the proposal block.`, c.athlete, planMD, historyLines)
+
+	result, err := c.claude.SendMessage(ctx, system, userMsg)
+	if err != nil {
+		return "", fmt.Errorf("chat: %w", err)
+	}
+	return result.Text, nil
+}
+
+// ApplyProposal applies a change proposed by Claude in the chat.
+func (c *Coach) ApplyProposal(ctx context.Context, proposalJSON json.RawMessage) error {
+	var base struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(proposalJSON, &base); err != nil {
+		return fmt.Errorf("parsing proposal type: %w", err)
+	}
+
+	switch base.Type {
+	case "update_week":
+		var p struct {
+			Week      int    `json:"week"`
+			Saturday  string `json:"saturday"`
+			Monday    string `json:"monday"`
+			Wednesday string `json:"wednesday"`
+		}
+		if err := json.Unmarshal(proposalJSON, &p); err != nil {
+			return err
+		}
+		if c.planConfig == nil || c.planConfig.ID == 0 {
+			return fmt.Errorf("no active plan")
+		}
+		if c.planConfig.Weeks == nil {
+			c.planConfig.Weeks = make(map[int]PlanWeekConfig)
+		}
+		c.planConfig.Weeks[p.Week] = PlanWeekConfig{
+			Saturday: p.Saturday, Monday: p.Monday, Wednesday: p.Wednesday,
+		}
+		_, err := SavePlanToDB(ctx, c.store, c.planConfig)
+		if err != nil {
+			return err
+		}
+		c.store.LogEvent(ctx, "plan", fmt.Sprintf("Week %d updated via chat", p.Week), "")
+
+	case "new_plan":
+		var p struct {
+			Name       string                 `json:"name"`
+			StartDate  string                 `json:"start_date"`
+			TotalWeeks int                    `json:"total_weeks"`
+			Goal       string                 `json:"goal"`
+			GoalKm     float64                `json:"goal_km"`
+			Weeks      map[int]PlanWeekConfig `json:"weeks"`
+		}
+		if err := json.Unmarshal(proposalJSON, &p); err != nil {
+			return err
+		}
+		t, _ := time.Parse("2006-01-02", p.StartDate)
+		newPlan := &PlanConfig{
+			Name: p.Name, StartDate: p.StartDate, TotalWeeks: p.TotalWeeks,
+			Goal: p.Goal, GoalKm: p.GoalKm, Weeks: p.Weeks, startTime: t,
+		}
+		_, err := SavePlanToDB(ctx, c.store, newPlan)
+		if err != nil {
+			return err
+		}
+		c.store.LogEvent(ctx, "plan", "New plan created via chat: "+p.Name, "")
+
+	case "update_athlete":
+		var p struct {
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal(proposalJSON, &p); err != nil {
+			return err
+		}
+		if err := c.UpdateAthlete(ctx, p.Content); err != nil {
+			return err
+		}
+
+	default:
+		return fmt.Errorf("unknown proposal type: %s", base.Type)
+	}
+
+	// Reload plan after any change
+	return c.ReloadPlan(ctx)
 }
 
 func (c *Coach) GetStatus() Status {

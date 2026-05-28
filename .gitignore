@@ -3,7 +3,7 @@ data/
 *.db
 .DS_Store
 running-coach
-server
+/server
 
 # Config files with personal data — only .example files are committed
 config/athlete.md
