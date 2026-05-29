@@ -1,0 +1,9 @@
+.git
+.env
+data/
+*.db
+.DS_Store
+running-coach
+README.md
+CLAUDE.md
+.claude/

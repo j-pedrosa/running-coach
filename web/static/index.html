@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Running Coach</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head>
+<body>
+  <div class="header">
+    <h1><span>🏃</span> Running Coach</h1>
+    <button class="btn btn-primary" id="run-btn">Run Now</button>
+  </div>
+
+  <!-- Pipeline progress bar -->
+  <div class="pipeline-bar" id="pipeline-bar" style="display:none">
+    <div class="pipeline-steps">
+      <span class="pipe-step" data-step="strava">Strava</span>
+      <span class="pipe-step" data-step="strava-detail">Detalhes</span>
+      <span class="pipe-step" data-step="claude">Claude AI</span>
+      <span class="pipe-step" data-step="chart">Gráfico</span>
+      <span class="pipe-step" data-step="telegram">Telegram</span>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="dashboard">🏃 Última Corrida</div>
+    <div class="tab" data-tab="plan">📋 Plano</div>
+    <div class="tab" data-tab="chat">💬 Coach</div>
+    <div class="tab" data-tab="health">⚙️ Sistema</div>
+  </div>
+
+  <div class="content">
+    <div class="tab-panel active" id="dashboard">
+      <div id="dashboard-content">
+        <div class="loading"><div class="spinner"></div><p>A carregar...</p></div>
+      </div>
+      <div id="history"></div>
+    </div>
+
+    <div class="tab-panel" id="plan">
+      <div class="loading"><div class="spinner"></div><p>A carregar...</p></div>
+    </div>
+
+    <div class="tab-panel" id="chat">
+      <div class="card chat-card">
+        <div class="chat-messages" id="chat-messages">
+          <div class="chat-msg bot">
+            <div class="chat-bubble">Olá! Sou o teu coach de corrida. Pergunta-me o que quiseres sobre o teu treino, plano, progresso, ou corrida em geral. 🏃</div>
+          </div>
+        </div>
+        <div class="chat-input-row">
+          <input type="text" id="chat-input" class="chat-input" placeholder="Pergunta ao teu coach..." autocomplete="off">
+          <button class="btn btn-primary" id="chat-send">Enviar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-panel" id="health">
+      <div class="loading"><div class="spinner"></div><p>A carregar...</p></div>
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

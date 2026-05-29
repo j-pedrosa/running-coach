@@ -1,0 +1,34 @@
+# Athlete Profile
+# Copy this file to athlete.md and fill in your data.
+# This file is sent to Claude as context for coaching reports.
+# Write in English for best results — Claude will respond in Portuguese.
+
+## Personal Data
+- **Age:** 30 | **Height:** 1.75m | **Weight:** 75kg
+- **Location:** Your city/country
+
+## Athletic Background
+- Describe your sport history, years active, time away from sport
+- Any relevant past training experience
+
+## Injury & Health History
+- **Known issues:** List any chronic injuries or conditions
+- **Current status:** How you feel day to day
+- **Sleep:** Hours per night
+- **Nutrition:** Any relevant diet info, weight journey
+- **Shoes:** Model, condition, surface you run on
+
+## Goals
+- Your primary running goal (e.g., run 5km continuously)
+- Secondary goals (weight loss, endurance, etc.)
+
+## Coaching Principles (always apply)
+1. Target pace range (e.g., 9:30–10:30/km)
+2. Target HR zone (e.g., Zone 2: 115–135 bpm)
+3. Any safety thresholds (e.g., flag if max HR > 165)
+4. Recovery priorities
+
+## Analysis Rules — Read Before Every Report
+- Describe how you record activities (e.g., warm-up/cool-down included in recording)
+- How to calculate actual running time from Strava data
+- Any quirks in your data that the coach should know about
