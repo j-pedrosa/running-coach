@@ -164,26 +164,24 @@ func splitMessage(text string, maxLen int) []string {
 }
 
 var (
-	reH1     = regexp.MustCompile(`(?m)^# (.+)$`)
-	reH2     = regexp.MustCompile(`(?m)^## (.+)$`)
-	reH3     = regexp.MustCompile(`(?m)^### (.+)$`)
-	reBold   = regexp.MustCompile(`\*\*(.+?)\*\*`)
-	reItalic = regexp.MustCompile(`(?:^|[^*])\*([^*]+?)\*(?:[^*]|$)`)
+	reH1   = regexp.MustCompile(`(?m)^#{1,3} (.+)$`)
+	reBold = regexp.MustCompile(`\*\*(.+?)\*\*`)
+	reHR   = regexp.MustCompile(`(?m)^-{3,}$`)
 )
 
 // markdownToHTML converts Claude's markdown report to Telegram-safe HTML.
 // Telegram supports: <b>, <i>, <u>, <s>, <a>, <code>, <pre>
+// Keep it minimal to avoid parse errors.
 func markdownToHTML(text string) string {
+	// Escape existing < > & first (Telegram treats them as HTML)
+	text = strings.ReplaceAll(text, "&", "&amp;")
+	text = strings.ReplaceAll(text, "<", "&lt;")
+	text = strings.ReplaceAll(text, ">", "&gt;")
 	// Headers → bold
-	text = reH3.ReplaceAllString(text, "<b>$1</b>")
-	text = reH2.ReplaceAllString(text, "\n<b>$1</b>")
 	text = reH1.ReplaceAllString(text, "\n<b>$1</b>")
-	// Bold
+	// Bold **text**
 	text = reBold.ReplaceAllString(text, "<b>$1</b>")
-	// Italic (simple cases only — avoid breaking bold)
-	text = reItalic.ReplaceAllString(text, "<i>$1</i>")
 	// Horizontal rules → empty line
-	text = strings.ReplaceAll(text, "---", "")
-	// Bullet points — keep as-is (Telegram renders them fine as plain text)
+	text = reHR.ReplaceAllString(text, "")
 	return strings.TrimSpace(text)
 }

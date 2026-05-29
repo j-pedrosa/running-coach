@@ -507,7 +507,7 @@ Respond in European Portuguese (pt-PT) with these sections (use markdown):
 2-3 sentences with key data (actual running time, distance, pace, HR). State which session was planned and whether the athlete followed it.
 
 🧠 **O QUE MAIS ME IMPRESSIONOU**
-Detailed analysis: pace per lap, HR zones, cardiac pattern, adaptation signs
+High-level analysis: pace consistency, HR zone distribution, cardiac adaptation signs. Do NOT list individual laps or their data — the charts already show that. Focus on patterns, trends, and what the data means for the athlete's progress.
 
 ⚠️ **FLAG HONESTA**
 Compare what was done vs what was in the plan. If the athlete did more or less than prescribed, say it clearly and explain the consequences.
@@ -518,8 +518,8 @@ Overall assessment of the session against the planned session for this day
 📈 **PROGRESSO**
 Comparison with previous sessions, trends
 
-🏃 **PRÓXIMAS SESSÕES**
-What to do in upcoming sessions (specific, based on the plan)
+🏃 **PRÓXIMA SESSÃO**
+Only the very next session (one session, not multiple). State the day, the planned session description, and 2-3 practical tips. Do NOT list multiple future sessions.
 
 💥 **RESUMO DIRETO**
 1-2 raw, honest sentences about the current state`, c.athlete, c.planConfig.ToMarkdown())

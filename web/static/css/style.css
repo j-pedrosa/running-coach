@@ -418,6 +418,19 @@ body {
 .empty-state .icon { font-size: 3rem; margin-bottom: 12px; }
 .empty-state p { font-size: 0.9rem; }
 
+/* Weight card */
+.weight-display { text-align: center; }
+.weight-current { font-size: 2rem; font-weight: 700; color: var(--accent); }
+.weight-journey {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0;
+}
+.weight-journey .progress-bar { flex: 1; }
+.weight-start, .weight-goal { font-size: 0.8rem; color: var(--text-muted); white-space: nowrap; }
+.weight-lost { font-size: 0.85rem; color: var(--success); font-weight: 600; }
+
 /* Pipeline progress bar (#9) */
 .pipeline-bar {
   background: var(--surface);

@@ -124,16 +124,30 @@ function timeAgo(dateStr) {
 // ── Dashboard Tab ─────────────────────────────────────
 
 async function loadDashboard() {
-  const [activity, report, activities] = await Promise.all([
+  const [activity, report, activities, profile] = await Promise.all([
     fetchJSON('/api/activities/latest'),
     fetchJSON('/api/reports/latest'),
     fetchJSON('/api/activities?limit=20'),
+    fetchJSON('/api/athlete/profile'),
   ]);
-  renderDashboard(activity, report);
+  renderDashboard(activity, report, profile);
   renderHistory(activities || []);
 }
 
-function renderDashboard(activity, report) {
+function parseWeight(profileContent) {
+  if (!profileContent) return null;
+  // Match "Weight: 80kg" or "Weight: 79.80kg"
+  const current = profileContent.match(/Weight:\s*(\d+(?:\.\d+)?)\s*kg/i);
+  // Match journey like "85kg (Sep 2025) → 79.80kg (May 2026)"
+  const journey = profileContent.match(/(\d+(?:\.\d+)?)kg\s*\([^)]+\)\s*→\s*(\d+(?:\.\d+)?)kg\s*\([^)]+\)/);
+  return {
+    current: current ? parseFloat(current[1]) : null,
+    start: journey ? parseFloat(journey[1]) : null,
+    end: journey ? parseFloat(journey[2]) : null,
+  };
+}
+
+function renderDashboard(activity, report, profile) {
   const panel = document.getElementById('dashboard-content');
   if (!activity) {
     panel.innerHTML = `<div class="empty-state"><div class="icon">🏃</div><p>Ainda sem corridas. Carrega em "Run Now".</p></div>`;
@@ -142,6 +156,9 @@ function renderDashboard(activity, report) {
 
   const z2pct = activity.splits
     ? Math.round(activity.splits.filter(s => s.avg_hr >= 115 && s.avg_hr <= 135).length / activity.splits.length * 100) : 0;
+
+  // Weight from profile
+  const weight = parseWeight(profile?.content);
 
   // Goal tracking (#13): find max continuous run distance from laps
   const goalKm = 5;
@@ -329,16 +346,31 @@ async function toggleReport(activityId) {
 // ── Plan Tab ──────────────────────────────────────────
 
 async function loadPlan() {
-  const planStatus = await fetchJSON('/api/plan/status');
-  renderPlan(planStatus);
+  const [planStatus, profile] = await Promise.all([
+    fetchJSON('/api/plan/status'),
+    fetchJSON('/api/athlete/profile'),
+  ]);
+  renderPlan(planStatus, profile);
 }
 
 function sessionIcon(s) { return { done: '✅', missed: '❌', upcoming: '⬜', na: '➖' }[s] || '⬜'; }
 function sessionTypeIcon(t) { return t === 'run' ? '🏃' : '💪'; }
 
-function renderPlan(plan) {
+function renderPlan(plan, profile) {
   const panel = document.getElementById('plan');
   if (!plan) { panel.innerHTML = '<div class="empty-state"><p>Plano não disponível.</p></div>'; return; }
+
+  const weight = parseWeight(profile?.content);
+  const lost = weight && weight.start ? (weight.start - (weight.current || weight.end)).toFixed(1) : 0;
+  const weightCard = weight && weight.start ? `
+    <div class="card">
+      <div class="card-title">Peso</div>
+      <div class="hero-stats" style="grid-template-columns:repeat(3,1fr)">
+        <div class="stat"><div class="stat-value">${weight.start}kg</div><div class="stat-label">Início</div></div>
+        <div class="stat"><div class="stat-value" style="color:var(--accent)">${weight.current || weight.end}kg</div><div class="stat-label">Atual</div></div>
+        <div class="stat"><div class="stat-value" style="color:var(--success)">-${lost}kg</div><div class="stat-label">Perdidos</div></div>
+      </div>
+    </div>` : '';
 
   panel.innerHTML = `
     <div class="card plan-progress">
@@ -346,6 +378,7 @@ function renderPlan(plan) {
       <div class="progress-bar"><div class="progress-fill" style="width:${plan.progress}%"></div></div>
       <div class="progress-label"><span>Semana ${plan.current_week} de ${plan.total_weeks}</span><span>${plan.progress}%</span></div>
     </div>
+    ${weightCard}
     <div class="week-grid">
       ${plan.weeks.map(w => `
         <div class="week-card ${w.status === 'current' ? 'week-current' : ''} ${w.status === 'done' ? 'week-clickable' : ''}" ${w.status === 'done' ? `data-week="${w.week}"` : ''}>
